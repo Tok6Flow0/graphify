@@ -51,6 +51,7 @@ leiden = ["graspologic; python_version < '3.13'"]
 office = ["python-docx", "openpyxl"]
 video = ["faster-whisper", "yt-dlp"]
 kimi = ["openai"]
+test = ["pytest>=7", "pytest-cov"]
 all = ["mcp", "neo4j", "pypdf", "html2text", "watchdog", "graspologic; python_version < '3.13'", "python-docx", "openpyxl", "faster-whisper", "yt-dlp", "matplotlib", "openai"]
 
 [project.scripts]

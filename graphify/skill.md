@@ -195,7 +195,10 @@ Rules:
 
 Code files: focus on semantic edges AST cannot find (call relationships, shared data, arch patterns).
   Do not re-extract imports - AST already has those.
-Doc/paper files: extract named concepts, entities, citations.
+Doc/paper files: extract named concepts, entities, citations. For rationale (WHY decisions were made,
+  trade-offs, design intent): store as a `rationale` attribute on the relevant concept node — do NOT
+  create a separate rationale node. Valid `file_type` values are ONLY `code|document|paper|image` —
+  never emit `file_type:"rationale"` or `file_type:"concept"`.
 Image files: use vision to understand what the image IS - do not just OCR.
   UI screenshot: layout patterns, design decisions, key elements, purpose.
   Chart: metric, trend/insight, data source.

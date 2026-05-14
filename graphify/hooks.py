@@ -75,8 +75,21 @@ def _hooks_dir(root: Path) -> Path:
                 return p
     except (OSError, FileNotFoundError):
         pass
+    # In a linked worktree .git is a file not a directory, so we ask git
+    # for the real hooks path rather than constructing it ourselves.
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--path-format=absolute", "--git-path", "hooks"],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            d = Path(result.stdout.strip())
+            d.mkdir(parents=True, exist_ok=True)
+            return d
+    except (OSError, FileNotFoundError):
+        pass
     d = root / ".git" / "hooks"
-    d.mkdir(exist_ok=True)
+    d.mkdir(parents=True, exist_ok=True)
     return d
 
 

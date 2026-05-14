@@ -28,6 +28,15 @@ def build_from_json(extraction: dict) -> nx.Graph:
     hyperedges = extraction.get("hyperedges", [])
     if hyperedges:
         G.graph["hyperedges"] = hyperedges
+    # Strip degree-0 code nodes — they are bundled/synthetic symbols with no
+    # connections and only inflate god-node centrality and clustering noise.
+    # Document, paper, and image nodes are kept even when isolated since they
+    # may be leaf concepts intentionally referenced by the skill.
+    isolated_code = [
+        n for n in list(G.nodes())
+        if G.degree(n) == 0 and G.nodes[n].get("file_type") == "code"
+    ]
+    G.remove_nodes_from(isolated_code)
     return G
 
 

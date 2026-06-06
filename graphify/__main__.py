@@ -671,15 +671,19 @@ def install(platform: str = "claude", *, project: bool = False, project_dir: Pat
         registration = _skill_registration("~/.codebuddy/skills/graphify/SKILL.md")
         if codebuddy_md.exists():
             content = codebuddy_md.read_text(encoding="utf-8")
-            if "graphify" in content:
-                print(f"  CODEBUDDY.md     ->  already registered (no change)")
-            else:
-                codebuddy_md.write_text(content.rstrip() + registration, encoding="utf-8")
+            new_content = _replace_or_append_section(content, _CODEBUDDY_MD_MARKER, registration)
+            if new_content != content:
+                codebuddy_md.write_text(new_content, encoding="utf-8")
                 print(f"  CODEBUDDY.md     ->  skill registered in {codebuddy_md}")
+            else:
+                print(f"  CODEBUDDY.md     ->  already registered (no change)")
         else:
             codebuddy_md.parent.mkdir(parents=True, exist_ok=True)
             codebuddy_md.write_text(registration.lstrip(), encoding="utf-8")
             print(f"  CODEBUDDY.md     ->  created at {codebuddy_md}")
+        # Install the PreToolUse hook so CodeBuddy consults the graph before
+        # Glob/Grep calls (mirrors the Claude Code hook).
+        _install_codebuddy_hook(project_dir if project else Path("."))
 
     if platform == "opencode":
         _install_opencode_plugin(project_dir if project else Path("."))
@@ -1670,6 +1674,8 @@ def _project_uninstall(platform_name: str, project_dir: Path | None = None) -> N
         removed = _remove_skill_file(platform_name, project=True, project_dir=project_dir)
         if not removed:
             print("nothing to remove")
+    elif platform_name == "codebuddy":
+        codebuddy_uninstall(project_dir)
     else:
         _remove_skill_file(platform_name, project=True, project_dir=project_dir)
 
@@ -1844,6 +1850,7 @@ def uninstall_all(project_dir: Path | None = None, purge: bool = False) -> None:
 
     # Skill-file / config-section uninstallers
     claude_uninstall(pd)
+    codebuddy_uninstall(pd)
     gemini_uninstall(pd)
     vscode_uninstall(pd)
     _cursor_uninstall(pd)
@@ -1921,15 +1928,17 @@ def codebuddy_install(project_dir: Path | None = None) -> None:
 
     if target.exists():
         content = target.read_text(encoding="utf-8")
-        if _CODEBUDDY_MD_MARKER in content:
-            print("graphify already configured in CODEBUDDY.md")
-            return
-        new_content = content.rstrip() + "\n\n" + _CODEBUDDY_MD_SECTION
+        new_content = _replace_or_append_section(
+            content, _CODEBUDDY_MD_MARKER, _CODEBUDDY_MD_SECTION
+        )
     else:
         new_content = _CODEBUDDY_MD_SECTION
 
-    target.write_text(new_content, encoding="utf-8")
-    print(f"graphify section written to {target.resolve()}")
+    if target.exists() and new_content == target.read_text(encoding="utf-8"):
+        print(f"graphify already configured in {target.resolve()} (no change)")
+    else:
+        target.write_text(new_content, encoding="utf-8")
+        print(f"graphify section written to {target.resolve()}")
 
     # Also write CodeBuddy PreToolUse hook to .codebuddy/settings.json
     _install_codebuddy_hook(project_dir or Path("."))

@@ -488,9 +488,11 @@ _PLATFORM_CONFIG: dict[str, dict] = {
         "skill_refs": "pi",
     },
     "codebuddy": {
+        # Reuses claude's split bundle (shares skill.md).
         "skill_file": "skill.md",
         "skill_dst": Path(".codebuddy") / "skills" / "graphify" / "SKILL.md",
         "claude_md": False,
+        "skill_refs": "claude",
     },
     "antigravity": {
         # Rides claude's split bundle (shares skill.md).
@@ -671,19 +673,15 @@ def install(platform: str = "claude", *, project: bool = False, project_dir: Pat
         registration = _skill_registration("~/.codebuddy/skills/graphify/SKILL.md")
         if codebuddy_md.exists():
             content = codebuddy_md.read_text(encoding="utf-8")
-            new_content = _replace_or_append_section(content, _CODEBUDDY_MD_MARKER, registration)
-            if new_content != content:
-                codebuddy_md.write_text(new_content, encoding="utf-8")
-                print(f"  CODEBUDDY.md     ->  skill registered in {codebuddy_md}")
-            else:
+            if "graphify" in content:
                 print(f"  CODEBUDDY.md     ->  already registered (no change)")
+            else:
+                codebuddy_md.write_text(content.rstrip() + registration, encoding="utf-8")
+                print(f"  CODEBUDDY.md     ->  skill registered in {codebuddy_md}")
         else:
             codebuddy_md.parent.mkdir(parents=True, exist_ok=True)
             codebuddy_md.write_text(registration.lstrip(), encoding="utf-8")
             print(f"  CODEBUDDY.md     ->  created at {codebuddy_md}")
-        # Install the PreToolUse hook so CodeBuddy consults the graph before
-        # Glob/Grep calls (mirrors the Claude Code hook).
-        _install_codebuddy_hook(project_dir if project else Path("."))
 
     if platform == "opencode":
         _install_opencode_plugin(project_dir if project else Path("."))
@@ -714,17 +712,6 @@ def _print_install_usage() -> None:
 # a human edit one fragment instead of a triple-quoted literal here.
 
 _CLAUDE_MD_MARKER = "## graphify"
-
-_CODEBUDDY_MD_SECTION = """\
-## graphify
-
-This project has a graphify knowledge graph at graphify-out/.
-
-Rules:
-- Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
-- If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
-- After modifying code files in this session, run `python3 -c "from graphify.watch import _rebuild_code; from pathlib import Path; _rebuild_code(Path('.'))"` to keep the graph current
-"""
 
 _CODEBUDDY_MD_MARKER = "## graphify"
 
@@ -1929,10 +1916,10 @@ def codebuddy_install(project_dir: Path | None = None) -> None:
     if target.exists():
         content = target.read_text(encoding="utf-8")
         new_content = _replace_or_append_section(
-            content, _CODEBUDDY_MD_MARKER, _CODEBUDDY_MD_SECTION
+            content, _CODEBUDDY_MD_MARKER, _always_on("claude-md")
         )
     else:
-        new_content = _CODEBUDDY_MD_SECTION
+        new_content = _always_on("claude-md")
 
     if target.exists() and new_content == target.read_text(encoding="utf-8"):
         print(f"graphify already configured in {target.resolve()} (no change)")
@@ -1989,9 +1976,11 @@ def _uninstall_codebuddy_hook(project_dir: Path) -> None:
     print(f"  .codebuddy/settings.json  ->  PreToolUse hook removed")
 
 
-def codebuddy_uninstall(project_dir: Path | None = None) -> None:
-    """Remove the graphify section from the local CODEBUDDY.md."""
-    target = (project_dir or Path(".")) / "CODEBUDDY.md"
+def codebuddy_uninstall(project_dir: Path | None = None, *, project: bool = False) -> None:
+    """Remove the graphify skill tree (SKILL.md + references/) and the CODEBUDDY.md section."""
+    project_dir = project_dir or Path(".")
+    _remove_skill_file("codebuddy", project=project, project_dir=project_dir)
+    target = project_dir / "CODEBUDDY.md"
 
     if not target.exists():
         print("No CODEBUDDY.md found in current directory - nothing to do")

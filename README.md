@@ -173,6 +173,7 @@ Install only what you need:
 | `bedrock` | AWS Bedrock (uses IAM, no API key) | `uv tool install "graphifyy[bedrock]"` |
 | `sql` | SQL schema extraction | `uv tool install "graphifyy[sql]"` |
 | `dm` | BYOND DreamMaker `.dm`/`.dme` AST extraction (may need a C compiler + `python3-dev` if no wheel matches your platform) | `uv tool install "graphifyy[dm]"` |
+| `terraform` | Terraform / HCL `.tf`/`.tfvars`/`.hcl` AST extraction | `uv tool install "graphifyy[terraform]"` |
 | `chinese` | Chinese query segmentation (jieba) | `uv tool install "graphifyy[chinese]"` |
 | `all` | Everything above | `uv tool install "graphifyy[all]"` |
 
@@ -234,7 +235,8 @@ To remove graphify from all platforms at once: `graphify uninstall` (add `--purg
 
 | Type | Extensions |
 |------|-----------|
-| Code (33 languages) | `.py .ts .js .jsx .tsx .mjs .go .rs .java .c .cpp .h .hpp .rb .cs .kt .scala .php .swift .lua .luau .zig .ps1 .ex .exs .m .mm .jl .vue .svelte .astro .groovy .gradle .dart .v .sv .svh .sql .f .f90 .f95 .f03 .f08 .pas .pp .dpr .dpk .lpr .inc .dfm .lfm .lpk .sh .bash .json .dm .dme .dmi .dmm .dmf .sln .csproj .fsproj .vbproj .razor .cshtml` (`.dm`/`.dme` AST extraction requires `uv tool install graphifyy[dm]`) |
+| Code (28 tree-sitter grammars) | `.py .ts .js .jsx .tsx .mjs .go .rs .java .c .cpp .h .hpp .rb .cs .kt .scala .php .swift .lua .luau .zig .ps1 .ex .exs .m .mm .jl .vue .svelte .astro .groovy .gradle .dart .v .sv .svh .sql .f .f90 .f95 .f03 .f08 .pas .pp .dpr .dpk .lpr .inc .dfm .lfm .lpk .sh .bash .json .dm .dme .dmi .dmm .dmf .sln .csproj .fsproj .vbproj .razor .cshtml` (`.dm`/`.dme` requires `uv tool install graphifyy[dm]`) |
+| Terraform / HCL | `.tf .tfvars .hcl` (requires `uv tool install graphifyy[terraform]`) |
 | MCP configs | `.mcp.json` `mcp.json` `mcp_servers.json` `claude_desktop_config.json` — extracts server nodes, package refs, env var requirements |
 | Docs | `.md .mdx .qmd .html .txt .rst .yaml .yml` |
 | Office | `.docx .xlsx` (requires `uv tool install graphifyy[office]`) |
@@ -296,7 +298,9 @@ See the [full command reference](#full-command-reference) below.
 
 ## Ignoring files
 
-Create a `.graphifyignore` in your project root — same syntax as `.gitignore`, including `!` negation:
+Create a `.graphifyignore` in your project root — same syntax as `.gitignore`, including `!` negation.
+
+**`.gitignore` is respected automatically.** If no `.graphifyignore` is present in a directory, graphify falls back to the `.gitignore` in that directory. If both exist, `.graphifyignore` takes priority. Subdirectory scoping works the same way as git — an ignore file only affects its own subtree.
 
 ```
 # .graphifyignore
@@ -386,7 +390,7 @@ These are only needed for **headless / CI extraction** (`graphify extract`). Whe
 
 ## Privacy
 
-- **Code files** — processed locally via tree-sitter. Nothing leaves your machine.
+- **Code files** — processed locally via tree-sitter. Nothing leaves your machine. A code-only corpus requires no API key — `graphify extract` runs fully offline.
 - **Video / audio** — transcribed locally with faster-whisper. Nothing leaves your machine.
 - **Docs, PDFs, images** — sent to your AI assistant for semantic extraction (via the `/graphify` skill, using whatever model your IDE session runs). Headless `graphify extract` requires `GEMINI_API_KEY` / `GOOGLE_API_KEY` (Gemini), `MOONSHOT_API_KEY` (Kimi), `ANTHROPIC_API_KEY` (Claude), `OPENAI_API_KEY` (OpenAI), `DEEPSEEK_API_KEY` (DeepSeek), a running Ollama instance (`OLLAMA_BASE_URL`), AWS credentials via the standard provider chain (Bedrock - no API key needed, uses IAM), or the `claude` CLI binary (Claude Code - no API key needed, uses your Claude subscription). The `--dedup-llm` flag uses the same key.
 - **Data residency** — `graphify extract` auto-detects which provider to use based on which API key is set (priority: Gemini → Kimi → Claude → OpenAI → DeepSeek → Bedrock → Ollama). For code with data-residency requirements, use `--backend ollama` (fully local) or pass an explicit `--backend` flag. Kimi (`MOONSHOT_API_KEY`) routes to Moonshot AI servers in China.
@@ -435,7 +439,7 @@ graphify query "..."
 Run `graphify hook install` — it sets up a git merge driver that union-merges `graph.json` automatically so conflicts never happen.
 
 **Extraction returns empty nodes/edges for docs or PDFs**
-Docs and PDFs require an LLM call. Check that your API key is set and the backend is correct:
+Docs, PDFs, and images require an LLM call — code-only corpora need no key. Check that your API key is set and the backend is correct:
 ```bash
 ANTHROPIC_API_KEY=sk-... graphify extract ./docs --backend claude
 ```

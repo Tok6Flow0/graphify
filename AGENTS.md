@@ -9,7 +9,8 @@ Before codebase questions, read:
 After code/docs/skill/site edits, run:
 - `./scripts/graphify.sh update .`
 
-If the local launcher is missing, run once:
-- `/Users/aaronsamuel/Documents/Codex/2026-07-02/do-some-deep-reading-on-this/work/graphify/scripts/graphify.sh update .`
+If the local launcher is missing, reroute through the repo root:
+- `ROOT_DIR="$(git rev-parse --show-toplevel)"`
+- `"${ROOT_DIR}/scripts/graphify.sh" update .`
 
 Commit updated `graphify-out/*` files with related changes.

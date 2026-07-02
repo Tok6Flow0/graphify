@@ -12,7 +12,7 @@ import re
 import hashlib
 from collections import defaultdict, Counter
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 import sys
 
@@ -288,7 +288,6 @@ def _write_fallback_graph_json(out_dir: Path, graph: SimpleGraph, communities: d
 
 def _write_fallback_manifest(out_dir: Path, detection: dict, repo_root: Path) -> None:
     manifest = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
         "repo_root": str(repo_root),
         "files": detection["files"],
     }
@@ -307,7 +306,6 @@ def _write_fallback_report(
     report_lines = [
         "# Graph Report",
         "",
-        f"Generated: {datetime.now(timezone.utc).isoformat()}Z",
         f"Repository: {repo_root}",
         "",
         "## Summary",

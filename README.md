@@ -34,6 +34,7 @@ pip install graphifyy && graphify install
 
 > **Windows:** If `graphify` is not recognized after install, add the Python Scripts folder to your PATH: `%APPDATA%\Python\Python3xx\Scripts` (replace `3xx` with your Python version, e.g. `313`). Or use `pipx install graphifyy` which handles PATH automatically.
 > **macOS (externally managed):** Use `pipx install graphifyy` if `pip install` fails with an "externally-managed-environment" error.
+> **Cross-platform fallback:** If `graphify` is still not on `PATH`, run `python3 -m graphify ...` instead, or use the repo launcher `./scripts/graphify.sh ...`.
 
 Then open Claude Code in any directory and type:
 

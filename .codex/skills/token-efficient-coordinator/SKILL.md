@@ -151,7 +151,20 @@ Optional visuals:
 python3 scripts/token_efficiency.py visualize
 ```
 
-The visualizer writes Matplotlib PNGs when Matplotlib is installed, otherwise SVG/HTML fallback charts. It also generates a callable Remotion package at `.codex/token-usage/visuals/remotion/` with animated sheets for overview, timeline, branch, model, task kind, and tag usage. Preview it with `npm install && npm run studio`, render one frame with `npm run still`, or export video with `npm run render`.
+The visualizer must produce a reader-useful dashboard, not isolated sparse charts. It writes:
+
+- `index.html`: a compact report-style dashboard with executive summary, KPI cards, prompt-level timeline, last-7-days rollup, average tokens per prompt, branch/model/kind/tag concentration, recent prompt ledger, and caveats.
+- `dashboard-data.json`: bounded dashboard data for audit or downstream report widgets.
+- Static SVG chart assets for prompt sequence, 7-day daily rollup, branch, model, task kind, and tag usage.
+- `remotion-token-efficiency-data.json` and a callable Remotion package at `.codex/token-usage/visuals/remotion/`.
+
+Do not collapse multiple same-day prompts into one unexplained point. Daily charts are rollups only; always preserve prompt-level rows and a prompt sequence chart. The 7-day view should include empty days and show total tokens, prompt count, and average tokens per prompt. Use `--pdf` or `--pdf-path` when the user wants a static PDF export:
+
+```bash
+python3 scripts/token_efficiency.py visualize --pdf
+```
+
+PDF export uses Chrome/Chromium when available and keeps the HTML dashboard as the source of truth. Preview Remotion with `npm install && npm run studio`, render one frame with `npm run still`, or export video with `npm run render`.
 
 ## Routing Policy
 

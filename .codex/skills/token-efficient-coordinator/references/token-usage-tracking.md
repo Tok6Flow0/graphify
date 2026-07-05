@@ -28,11 +28,18 @@ python3 scripts/token_efficiency.py merge --write-summary
 
 ## Visualization
 
-- `python3 scripts/token_efficiency.py visualize` creates charts by day, branch, model, and tag.
-- Matplotlib is optional. If it is not installed, the script writes SVG and HTML fallback charts.
-- The same command also generates a Remotion package under `.codex/token-usage/visuals/remotion/`.
-- The Remotion package has animated sheets for overview, timeline, branch, model, task kind, and tag usage.
-- To preview or export it:
+- `python3 scripts/token_efficiency.py visualize` creates a report-style dashboard, not a loose chart dump.
+- The dashboard must include an executive summary, KPI cards, prompt-level timeline, last-7-days rollup, average tokens per prompt, branch/model/kind/tag concentration, recent prompt ledger, and caveats.
+- Multiple prompts on the same day must remain visible as separate prompt-level events. Daily charts are rollups only.
+- The 7-day rollup should show empty days, total tokens, prompt counts, and average tokens per prompt.
+- The command writes `index.html`, `dashboard-data.json`, static SVG chart assets, `remotion-token-efficiency-data.json`, and a Remotion package under `.codex/token-usage/visuals/remotion/`.
+- Use `--pdf` or `--pdf-path` to export a static PDF through Chrome/Chromium while keeping the HTML dashboard as the source of truth:
+
+```bash
+python3 scripts/token_efficiency.py visualize --pdf
+```
+
+- To preview or export Remotion:
 
 ```bash
 cd .codex/token-usage/visuals/remotion

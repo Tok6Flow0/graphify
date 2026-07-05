@@ -2,45 +2,45 @@
   "by_branch": {
     "main": {
       "cached_input_tokens": 0,
-      "estimated_api_usd": 0.026405,
-      "estimated_codex_credits": 0.6601,
-      "events": 1,
-      "input_tokens": 31,
-      "output_tokens": 875,
-      "total_tokens": 906
+      "estimated_api_usd": 0.063185,
+      "estimated_codex_credits": 1.5796,
+      "events": 2,
+      "input_tokens": 97,
+      "output_tokens": 2090,
+      "total_tokens": 2187
     }
   },
   "by_day": {
     "2026-07-05": {
       "cached_input_tokens": 0,
-      "estimated_api_usd": 0.026405,
-      "estimated_codex_credits": 0.6601,
-      "events": 1,
-      "input_tokens": 31,
-      "output_tokens": 875,
-      "total_tokens": 906
+      "estimated_api_usd": 0.063185,
+      "estimated_codex_credits": 1.5796,
+      "events": 2,
+      "input_tokens": 97,
+      "output_tokens": 2090,
+      "total_tokens": 2187
     }
   },
   "by_kind": {
     "skill-update": {
       "cached_input_tokens": 0,
-      "estimated_api_usd": 0.026405,
-      "estimated_codex_credits": 0.6601,
-      "events": 1,
-      "input_tokens": 31,
-      "output_tokens": 875,
-      "total_tokens": 906
+      "estimated_api_usd": 0.063185,
+      "estimated_codex_credits": 1.5796,
+      "events": 2,
+      "input_tokens": 97,
+      "output_tokens": 2090,
+      "total_tokens": 2187
     }
   },
   "by_model": {
     "gpt-5.5": {
       "cached_input_tokens": 0,
-      "estimated_api_usd": 0.026405,
-      "estimated_codex_credits": 0.6601,
-      "events": 1,
-      "input_tokens": 31,
-      "output_tokens": 875,
-      "total_tokens": 906
+      "estimated_api_usd": 0.063185,
+      "estimated_codex_credits": 1.5796,
+      "events": 2,
+      "input_tokens": 97,
+      "output_tokens": 2090,
+      "total_tokens": 2187
     }
   },
   "by_tag": {
@@ -53,6 +53,15 @@
       "output_tokens": 875,
       "total_tokens": 906
     },
+    "pdf-export": {
+      "cached_input_tokens": 0,
+      "estimated_api_usd": 0.03678,
+      "estimated_codex_credits": 0.9195,
+      "events": 1,
+      "input_tokens": 66,
+      "output_tokens": 1215,
+      "total_tokens": 1281
+    },
     "railway-audit": {
       "cached_input_tokens": 0,
       "estimated_api_usd": 0.026405,
@@ -62,25 +71,34 @@
       "output_tokens": 875,
       "total_tokens": 906
     },
+    "telemetry-dashboard": {
+      "cached_input_tokens": 0,
+      "estimated_api_usd": 0.03678,
+      "estimated_codex_credits": 0.9195,
+      "events": 1,
+      "input_tokens": 66,
+      "output_tokens": 1215,
+      "total_tokens": 1281
+    },
     "token-efficiency": {
       "cached_input_tokens": 0,
-      "estimated_api_usd": 0.026405,
-      "estimated_codex_credits": 0.6601,
-      "events": 1,
-      "input_tokens": 31,
-      "output_tokens": 875,
-      "total_tokens": 906
+      "estimated_api_usd": 0.063185,
+      "estimated_codex_credits": 1.5796,
+      "events": 2,
+      "input_tokens": 97,
+      "output_tokens": 2090,
+      "total_tokens": 2187
     }
   },
-  "generated_at_utc": "2026-07-05T18:48:04+00:00",
+  "generated_at_utc": "2026-07-05T19:47:20+00:00",
   "schema_version": 1,
   "totals": {
     "cached_input_tokens": 0,
-    "estimated_api_usd": 0.026405,
-    "estimated_codex_credits": 0.6601,
-    "events": 1,
-    "input_tokens": 31,
-    "output_tokens": 875,
-    "total_tokens": 906
+    "estimated_api_usd": 0.063185,
+    "estimated_codex_credits": 1.5796,
+    "events": 2,
+    "input_tokens": 97,
+    "output_tokens": 2090,
+    "total_tokens": 2187
   }
 }

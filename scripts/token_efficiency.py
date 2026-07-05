@@ -15,6 +15,7 @@ import json
 import math
 import os
 import re
+import shutil
 import subprocess
 import sys
 import uuid
@@ -479,6 +480,283 @@ def estimate(args: argparse.Namespace) -> int:
     return 0
 
 
+def parse_event_time(event: dict[str, Any]) -> dt.datetime | None:
+    raw = str(event.get("created_at_utc") or "")
+    if not raw:
+        return None
+    try:
+        return dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def event_total_tokens(event: dict[str, Any]) -> int:
+    return int(nested_get(event, "usage.tokens.total_tokens", 0) or 0)
+
+
+def event_output_tokens(event: dict[str, Any]) -> int:
+    return int(nested_get(event, "usage.tokens.output_tokens", 0) or 0)
+
+
+def event_input_tokens(event: dict[str, Any]) -> int:
+    return int(nested_get(event, "usage.tokens.input_tokens", 0) or 0)
+
+
+def compact_number(value: float | int) -> str:
+    value = float(value)
+    sign = "-" if value < 0 else ""
+    value = abs(value)
+    if value >= 1_000_000:
+        return f"{sign}{value / 1_000_000:.1f}M"
+    if value >= 1_000:
+        return f"{sign}{value / 1_000:.1f}k"
+    if value == int(value):
+        return f"{sign}{int(value)}"
+    return f"{sign}{value:.1f}"
+
+
+def money(value: float | int) -> str:
+    return f"${float(value):,.4f}"
+
+
+def pct(value: float | int) -> str:
+    return f"{float(value) * 100:.1f}%"
+
+
+def display_date(value: dt.date | str) -> str:
+    if isinstance(value, str):
+        try:
+            value = dt.date.fromisoformat(value[:10])
+        except ValueError:
+            return value
+    return value.strftime("%b %-d") if os.name != "nt" else value.strftime("%b %#d")
+
+
+def display_time(value: dt.datetime | None) -> str:
+    if value is None:
+        return "unknown"
+    local = value.astimezone()
+    return local.strftime("%b %-d, %-I:%M %p") if os.name != "nt" else local.strftime("%b %#d, %#I:%M %p")
+
+
+def usage_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for index, event in enumerate(events, start=1):
+        created = parse_event_time(event)
+        tags = nested_get(event, "task.tags", []) or []
+        workers = nested_get(event, "routing.workers", []) or []
+        rows.append(
+            {
+                "index": index,
+                "created": created,
+                "created_label": display_time(created),
+                "day": created.date().isoformat() if created else "unknown",
+                "time_label": created.astimezone().strftime("%H:%M") if created else f"#{index}",
+                "branch": str(nested_get(event, "git.branch", "unknown")),
+                "kind": str(nested_get(event, "task.kind", "unspecified")),
+                "summary": str(nested_get(event, "task.summary", "")),
+                "tags": ", ".join(str(tag) for tag in tags) or "untagged",
+                "model": str(nested_get(event, "routing.model", "unknown")),
+                "effort": str(nested_get(event, "routing.reasoning_effort", "unknown")),
+                "workers": ", ".join(str(worker) for worker in workers) or "none",
+                "input_tokens": event_input_tokens(event),
+                "output_tokens": event_output_tokens(event),
+                "total_tokens": event_total_tokens(event),
+                "api_usd": float(nested_get(event, "usage.estimated_api_usd", 0.0) or 0.0),
+                "codex_credits": float(nested_get(event, "usage.estimated_codex_credits", 0.0) or 0.0),
+            }
+        )
+    return rows
+
+
+def group_rows(rows: list[dict[str, Any]], field: str) -> list[dict[str, Any]]:
+    groups: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        raw = str(row.get(field) or "unknown")
+        labels = [label.strip() for label in raw.split(",") if label.strip()] if field == "tags" else [raw]
+        for label in labels or ["unknown"]:
+            bucket = groups.setdefault(label, {"label": label, "events": 0, "total_tokens": 0, "api_usd": 0.0})
+            bucket["events"] += 1
+            bucket["total_tokens"] += int(row["total_tokens"])
+            bucket["api_usd"] += float(row["api_usd"])
+    out: list[dict[str, Any]] = []
+    for bucket in groups.values():
+        events = max(int(bucket["events"]), 1)
+        bucket["avg_tokens"] = round(float(bucket["total_tokens"]) / events, 1)
+        out.append(bucket)
+    return sorted(out, key=lambda item: (item["total_tokens"], item["events"]), reverse=True)
+
+
+def last_n_days(rows: list[dict[str, Any]], days: int = 7) -> list[dict[str, Any]]:
+    dated = [row["created"].date() for row in rows if row.get("created")]
+    end = max(dated) if dated else dt.datetime.now().astimezone().date()
+    start = end - dt.timedelta(days=days - 1)
+    buckets: dict[str, dict[str, Any]] = {}
+    for offset in range(days):
+        day = start + dt.timedelta(days=offset)
+        buckets[day.isoformat()] = {
+            "day": day.isoformat(),
+            "label": display_date(day),
+            "events": 0,
+            "total_tokens": 0,
+            "avg_tokens": 0.0,
+            "api_usd": 0.0,
+        }
+    for row in rows:
+        day = row.get("day")
+        if day in buckets:
+            buckets[day]["events"] += 1
+            buckets[day]["total_tokens"] += int(row["total_tokens"])
+            buckets[day]["api_usd"] += float(row["api_usd"])
+    for bucket in buckets.values():
+        if bucket["events"]:
+            bucket["avg_tokens"] = round(float(bucket["total_tokens"]) / float(bucket["events"]), 1)
+    return list(buckets.values())
+
+
+def dashboard_metrics(summary: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
+    totals = summary.get("totals", {})
+    events = max(int(totals.get("events", 0) or 0), 0)
+    total_tokens = int(totals.get("total_tokens", 0) or 0)
+    input_tokens = int(totals.get("input_tokens", 0) or 0)
+    cached_tokens = int(totals.get("cached_input_tokens", 0) or 0)
+    output_tokens = int(totals.get("output_tokens", 0) or 0)
+    last7 = last_n_days(rows, 7)
+    top_prompt = max(rows, key=lambda row: row["total_tokens"], default=None)
+    worker_events = sum(1 for row in rows if row.get("workers") and row["workers"] != "none")
+    return {
+        "events": events,
+        "total_tokens": total_tokens,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cached_tokens": cached_tokens,
+        "cache_rate": (cached_tokens / input_tokens) if input_tokens else 0.0,
+        "avg_tokens": round(total_tokens / events, 1) if events else 0.0,
+        "last7_tokens": sum(int(day["total_tokens"]) for day in last7),
+        "last7_events": sum(int(day["events"]) for day in last7),
+        "last7_avg": round(
+            sum(int(day["total_tokens"]) for day in last7) / max(sum(int(day["events"]) for day in last7), 1),
+            1,
+        ),
+        "api_usd": float(totals.get("estimated_api_usd", 0.0) or 0.0),
+        "codex_credits": float(totals.get("estimated_codex_credits", 0.0) or 0.0),
+        "top_prompt_tokens": int(top_prompt["total_tokens"]) if top_prompt else 0,
+        "top_prompt_label": top_prompt["created_label"] if top_prompt else "n/a",
+        "worker_events": worker_events,
+        "worker_share": worker_events / events if events else 0.0,
+    }
+
+
+def svg_prompt_sequence(rows: list[dict[str, Any]], width: int = 1180, height: int = 310) -> str:
+    if not rows:
+        return svg_empty("Prompt-level usage", "No token events have been recorded yet.", width, height)
+    margin_left = 62
+    margin_right = 24
+    margin_top = 48
+    margin_bottom = 72
+    chart_w = width - margin_left - margin_right
+    chart_h = height - margin_top - margin_bottom
+    max_value = max([int(row["total_tokens"]) for row in rows] or [1]) or 1
+    coords: list[tuple[dict[str, Any], float, float]] = []
+    for i, row in enumerate(rows):
+        x = margin_left + (chart_w * i / max(1, len(rows) - 1)) if len(rows) > 1 else margin_left + chart_w / 2
+        y = margin_top + chart_h - (chart_h * int(row["total_tokens"]) / max_value)
+        coords.append((row, x, y))
+    path = " ".join(("M" if i == 0 else "L") + f"{x:.1f},{y:.1f}" for i, (_, x, y) in enumerate(coords))
+    dots: list[str] = []
+    for i, (row, x, y) in enumerate(coords):
+        color = PALETTE[i % len(PALETTE)]
+        radius = 6 if len(rows) > 1 else 10
+        dots.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{radius}" fill="{color}"/>')
+        if len(rows) <= 14 or i in {0, len(rows) - 1}:
+            dots.append(
+                f'<text x="{x:.1f}" y="{height - 34}" class="axis" text-anchor="middle">'
+                f'{escape_xml(str(row["time_label"]))}</text>'
+            )
+            dots.append(
+                f'<text x="{x:.1f}" y="{max(20, y - 12):.1f}" class="value" text-anchor="middle">'
+                f'{escape_xml(compact_number(row["total_tokens"]))}</text>'
+            )
+    body = (
+        f'<line x1="{margin_left}" y1="{margin_top + chart_h}" x2="{width - margin_right}" y2="{margin_top + chart_h}" class="grid"/>'
+        f'<line x1="{margin_left}" y1="{margin_top}" x2="{margin_left}" y2="{margin_top + chart_h}" class="grid"/>'
+        f'<path d="{path}" fill="none" stroke="#2563eb" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>'
+        + "\n".join(dots)
+    )
+    return SVG_TEMPLATE.format(width=width, height=height, title="Prompt-level usage", body=body)
+
+
+def svg_daily_rollup(days: list[dict[str, Any]], width: int = 1180, height: int = 330) -> str:
+    if not days:
+        return svg_empty("Last 7 days", "No day-level data available.", width, height)
+    margin_left = 58
+    margin_right = 22
+    margin_top = 52
+    margin_bottom = 78
+    chart_w = width - margin_left - margin_right
+    chart_h = height - margin_top - margin_bottom
+    max_value = max([int(day["total_tokens"]) for day in days] or [1]) or 1
+    bar_gap = 14
+    bar_w = max(24, int((chart_w - bar_gap * (len(days) - 1)) / max(len(days), 1)))
+    pieces: list[str] = [
+        f'<line x1="{margin_left}" y1="{margin_top + chart_h}" x2="{width - margin_right}" y2="{margin_top + chart_h}" class="grid"/>'
+    ]
+    for i, day in enumerate(days):
+        x = margin_left + i * (bar_w + bar_gap)
+        bar_h = 0 if max_value == 0 else chart_h * int(day["total_tokens"]) / max_value
+        y = margin_top + chart_h - bar_h
+        color = "#2563eb" if int(day["events"]) else "#cbd5e1"
+        pieces.append(f'<rect x="{x}" y="{y:.1f}" width="{bar_w}" height="{bar_h:.1f}" rx="7" fill="{color}"/>')
+        pieces.append(
+            f'<text x="{x + bar_w / 2:.1f}" y="{max(22, y - 10):.1f}" class="value" text-anchor="middle">'
+            f'{escape_xml(compact_number(day["total_tokens"]))}</text>'
+        )
+        pieces.append(f'<text x="{x + bar_w / 2:.1f}" y="{height - 42}" class="axis" text-anchor="middle">{escape_xml(day["label"])}</text>')
+        pieces.append(
+            f'<text x="{x + bar_w / 2:.1f}" y="{height - 22}" class="axis subtle" text-anchor="middle">'
+            f'{int(day["events"])} prompts / avg {escape_xml(compact_number(day["avg_tokens"]))}</text>'
+        )
+    return SVG_TEMPLATE.format(width=width, height=height, title="Last 7 days: total and average per prompt", body="\n".join(pieces))
+
+
+def svg_compact_bar(title: str, rows: list[dict[str, Any]], width: int = 560, height: int | None = None) -> str:
+    rows = rows[:8]
+    if not rows:
+        return svg_empty(title, "No data available.", width, 220)
+    margin_left = 150
+    margin_right = 72
+    margin_top = 52
+    row_h = 34
+    height = height or max(220, margin_top + row_h * len(rows) + 28)
+    chart_w = width - margin_left - margin_right
+    max_value = max([int(row["total_tokens"]) for row in rows] or [1]) or 1
+    pieces: list[str] = []
+    for i, row in enumerate(rows):
+        y = margin_top + i * row_h
+        bar_w = chart_w * int(row["total_tokens"]) / max_value
+        color = PALETTE[i % len(PALETTE)]
+        label = str(row["label"])
+        pieces.append(f'<text x="18" y="{y + 21}" class="label">{escape_xml(label[:22])}</text>')
+        pieces.append(f'<rect x="{margin_left}" y="{y}" width="{bar_w:.1f}" height="20" rx="5" fill="{color}"/>')
+        pieces.append(
+            f'<text x="{margin_left + bar_w + 8:.1f}" y="{y + 16}" class="value">'
+            f'{escape_xml(compact_number(row["total_tokens"]))}</text>'
+        )
+        pieces.append(
+            f'<text x="{width - 18}" y="{y + 16}" class="axis" text-anchor="end">'
+            f'avg {escape_xml(compact_number(row["avg_tokens"]))}</text>'
+        )
+    return SVG_TEMPLATE.format(width=width, height=height, title=escape_xml(title), body="\n".join(pieces))
+
+
+def svg_empty(title: str, message: str, width: int, height: int) -> str:
+    body = (
+        f'<rect x="24" y="72" width="{width - 48}" height="{height - 108}" rx="8" fill="#e2e8f0"/>'
+        f'<text x="{width / 2:.1f}" y="{height / 2:.1f}" class="label" text-anchor="middle">{escape_xml(message)}</text>'
+    )
+    return SVG_TEMPLATE.format(width=width, height=height, title=escape_xml(title), body=body)
+
+
 def chart_points(groups: dict[str, dict[str, Any]], limit: int = 12) -> list[tuple[str, float]]:
     items = [(key, float(value.get("total_tokens", 0))) for key, value in groups.items()]
     return sorted(items, key=lambda item: item[1], reverse=True)[:limit]
@@ -625,44 +903,125 @@ def visualize(args: argparse.Namespace) -> int:
     store = Path(args.store)
     out_dir = Path(args.output_dir) if args.output_dir else store / "visuals"
     out_dir.mkdir(parents=True, exist_ok=True)
-    summary = summarize(load_events(store))
-    write_json(out_dir / "remotion-token-efficiency-data.json", summary)
+    events = load_events(store)
+    summary = summarize(events)
+    rows = usage_rows(events)
+    write_json(out_dir / "remotion-token-efficiency-data.json", remotion_payload(summary))
+    write_json(out_dir / "dashboard-data.json", dashboard_payload(summary, rows))
 
-    assets = write_matplotlib_charts(summary, out_dir)
-    if not assets:
-        svg_specs = {
-            "token-efficiency-timeline.svg": svg_line_chart(
-                "Token efficiency timeline",
-                sorted((key, value["total_tokens"]) for key, value in (summary.get("by_day") or {}).items()),
-            ),
-            "token-efficiency-by-branch.svg": svg_bar_chart(
-                "Token efficiency by branch", chart_points(summary.get("by_branch", {}))
-            ),
-            "token-efficiency-by-model.svg": svg_bar_chart(
-                "Token efficiency by model", chart_points(summary.get("by_model", {}))
-            ),
-            "token-efficiency-by-tag.svg": svg_bar_chart(
-                "Token efficiency by tag", chart_points(summary.get("by_tag", {}))
-            ),
-        }
-        for name, svg in svg_specs.items():
-            (out_dir / name).write_text(svg, encoding="utf-8")
-            assets.append(name)
+    chart_assets = write_dashboard_charts(summary, rows, out_dir)
+    index = html_report(summary, rows, chart_assets)
+    html_path = out_dir / "index.html"
+    html_path.write_text(index, encoding="utf-8")
 
-    index = html_report(summary, assets)
-    (out_dir / "index.html").write_text(index, encoding="utf-8")
+    pdf_path: Path | None = None
+    if args.pdf or args.pdf_path:
+        pdf_path = Path(args.pdf_path) if args.pdf_path else out_dir / "token-efficiency-dashboard.pdf"
+        pdf_result = render_pdf(html_path, pdf_path)
+        if pdf_result:
+            print(pdf_result)
+
     remotion_dir = Path(args.remotion_dir) if args.remotion_dir else out_dir / "remotion"
     if not args.skip_remotion:
         write_remotion_package(summary, remotion_dir)
-    print(f"wrote {out_dir / 'index.html'}")
-    for asset in assets:
+    print(f"wrote {html_path}")
+    for asset in chart_assets:
         print(f"wrote {out_dir / asset}")
+    print(f"wrote {out_dir / 'dashboard-data.json'}")
     print(f"wrote {out_dir / 'remotion-token-efficiency-data.json'}")
+    if pdf_path and pdf_path.exists():
+        print(f"wrote {pdf_path}")
     if not args.skip_remotion:
         print(f"wrote {remotion_dir / 'package.json'}")
         print(f"preview with: cd {remotion_dir} && npm install && npm run studio")
         print(f"render still: cd {remotion_dir} && npm install && npm run still")
     return 0
+
+
+def write_dashboard_charts(summary: dict[str, Any], rows: list[dict[str, Any]], out_dir: Path) -> list[str]:
+    last7 = last_n_days(rows, 7)
+    charts = {
+        "token-efficiency-prompt-sequence.svg": svg_prompt_sequence(rows[-40:]),
+        "token-efficiency-last-7-days.svg": svg_daily_rollup(last7),
+        "token-efficiency-by-branch.svg": svg_compact_bar("Usage by branch", group_rows(rows, "branch")),
+        "token-efficiency-by-model.svg": svg_compact_bar("Usage by model", group_rows(rows, "model")),
+        "token-efficiency-by-kind.svg": svg_compact_bar("Usage by task kind", group_rows(rows, "kind")),
+        "token-efficiency-by-tag.svg": svg_compact_bar("Usage by tag", group_rows(rows, "tags")),
+    }
+    assets: list[str] = []
+    for name, svg in charts.items():
+        (out_dir / name).write_text(svg, encoding="utf-8")
+        assets.append(name)
+    return assets
+
+
+def dashboard_payload(summary: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
+    metrics = dashboard_metrics(summary, rows)
+    recent_rows: list[dict[str, Any]] = []
+    for row in rows[-25:]:
+        recent_rows.append(
+            {
+                key: value
+                for key, value in row.items()
+                if key != "created"
+            }
+        )
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "generated_at_utc": summary.get("generated_at_utc"),
+        "metrics": metrics,
+        "last_7_days": last_n_days(rows, 7),
+        "by_branch": group_rows(rows, "branch"),
+        "by_model": group_rows(rows, "model"),
+        "by_kind": group_rows(rows, "kind"),
+        "by_tag": group_rows(rows, "tags"),
+        "recent_prompts": recent_rows,
+    }
+
+
+def find_chrome() -> str | None:
+    candidates = [
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        "google-chrome",
+        "chromium",
+        "chromium-browser",
+    ]
+    for candidate in candidates:
+        if "/" in candidate and Path(candidate).exists():
+            return candidate
+        found = shutil.which(candidate)
+        if found:
+            return found
+    return None
+
+
+def render_pdf(html_path: Path, pdf_path: Path) -> str | None:
+    chrome = find_chrome()
+    if not chrome:
+        return "warning: Chrome/Chromium not found; skipped PDF export"
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.run(
+        [
+            chrome,
+            "--headless=new",
+            "--disable-gpu",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--no-pdf-header-footer",
+            f"--print-to-pdf={pdf_path}",
+            str(html_path.resolve()),
+        ],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if proc.returncode != 0:
+        return f"warning: PDF export failed: {proc.stderr.strip() or proc.stdout.strip()}"
+    if not pdf_path.exists() or pdf_path.stat().st_size <= 0:
+        return "warning: PDF export did not produce a non-empty file"
+    return f"verified pdf file exists ({pdf_path.stat().st_size} bytes)"
 
 
 def write_remotion_package(summary: dict[str, Any], remotion_dir: Path) -> None:
@@ -1138,44 +1497,258 @@ export const TokenUsageVideo: React.FC<TokenUsageVideoProps> = ({ data }) => {
 """
 
 
-def html_report(summary: dict[str, Any], assets: list[str]) -> str:
-    cards = "\n".join(
-        f'<section class="chart"><h2>{escape_xml(asset)}</h2><img src="{escape_xml(asset)}" alt="{escape_xml(asset)}"></section>'
-        for asset in assets
+def metric_card_html(label: str, value: str, context: str) -> str:
+    return (
+        '<article class="metric-card">'
+        f'<div class="metric-label">{escape_xml(label)}</div>'
+        f'<div class="metric-value">{escape_xml(value)}</div>'
+        f'<div class="metric-context">{escape_xml(context)}</div>'
+        "</article>"
     )
-    totals = summary.get("totals", {})
+
+
+def recent_prompt_rows(rows: list[dict[str, Any]], limit: int = 12) -> str:
+    recent = list(reversed(rows[-limit:]))
+    if not recent:
+        return '<tr><td colspan="8">No prompt events have been recorded yet.</td></tr>'
+    table_rows: list[str] = []
+    for row in recent:
+        table_rows.append(
+            "<tr>"
+            f"<td>{escape_xml(row['created_label'])}</td>"
+            f"<td>{escape_xml(row['branch'])}</td>"
+            f"<td>{escape_xml(row['kind'])}</td>"
+            f"<td>{escape_xml(row['model'])}</td>"
+            f"<td>{escape_xml(row['tags'][:42])}</td>"
+            f"<td class=\"num\">{compact_number(row['input_tokens'])}</td>"
+            f"<td class=\"num\">{compact_number(row['output_tokens'])}</td>"
+            f"<td class=\"num strong\">{compact_number(row['total_tokens'])}</td>"
+            "</tr>"
+        )
+    return "\n".join(table_rows)
+
+
+def concentration_note(rows: list[dict[str, Any]], field: str, label: str) -> str:
+    groups = group_rows(rows, field)
+    if not groups:
+        return f"No {label} concentration yet."
+    top = groups[0]
+    total = sum(int(group["total_tokens"]) for group in groups) or 1
+    share = int(top["total_tokens"]) / total
+    return (
+        f"{top['label']} leads {label} usage with {compact_number(top['total_tokens'])} tokens "
+        f"across {top['events']} prompt(s), about {pct(share)} of tracked usage."
+    )
+
+
+def html_report(summary: dict[str, Any], rows: list[dict[str, Any]], assets: list[str]) -> str:
+    metrics = dashboard_metrics(summary, rows)
+    generated = display_time(parse_event_time({"created_at_utc": summary.get("generated_at_utc", "")}))
+    branch_note = concentration_note(rows, "branch", "branch")
+    model_note = concentration_note(rows, "model", "model")
+    chart_map = {Path(asset).stem: asset for asset in assets}
+    total_events = metrics["events"]
+    total_tokens = metrics["total_tokens"]
+    executive_summary = [
+        f"<strong>{total_events} prompt events are logged.</strong> Current telemetry estimates {compact_number(total_tokens)} total tokens with an average of {compact_number(metrics['avg_tokens'])} tokens per prompt.",
+        f"<strong>The last 7 days are shown even when days are empty.</strong> This prevents same-day prompts from collapsing into one unexplained dot while still preserving daily rollups.",
+        f"<strong>Prompt-level timing is visible.</strong> The prompt sequence chart plots each recorded event separately, so multiple prompts on the same date remain distinct.",
+    ]
+    metric_cards = "\n".join(
+        [
+            metric_card_html("Tracked prompts", compact_number(metrics["events"]), "Immutable event JSON files"),
+            metric_card_html("Total tokens", compact_number(metrics["total_tokens"]), f"Avg {compact_number(metrics['avg_tokens'])} per prompt"),
+            metric_card_html("Last 7 days", compact_number(metrics["last7_tokens"]), f"{metrics['last7_events']} prompts, avg {compact_number(metrics['last7_avg'])}"),
+            metric_card_html("API estimate", money(metrics["api_usd"]), f"{metrics['codex_credits']:.2f} Codex credits"),
+            metric_card_html("Peak prompt", compact_number(metrics["top_prompt_tokens"]), metrics["top_prompt_label"]),
+            metric_card_html("Worker usage", pct(metrics["worker_share"]), f"{metrics['worker_events']} prompt(s) used workers"),
+            metric_card_html("Input/output mix", f"{compact_number(metrics['input_tokens'])} / {compact_number(metrics['output_tokens'])}", "Input tokens / output tokens"),
+            metric_card_html("Cache rate", pct(metrics["cache_rate"]), f"{compact_number(metrics['cached_tokens'])} cached input tokens"),
+        ]
+    )
+    summary_items = "\n".join(f"<li>{item}</li>" for item in executive_summary)
+    prompt_chart = chart_map.get("token-efficiency-prompt-sequence", "token-efficiency-prompt-sequence.svg")
+    daily_chart = chart_map.get("token-efficiency-last-7-days", "token-efficiency-last-7-days.svg")
+    branch_chart = chart_map.get("token-efficiency-by-branch", "token-efficiency-by-branch.svg")
+    model_chart = chart_map.get("token-efficiency-by-model", "token-efficiency-by-model.svg")
+    kind_chart = chart_map.get("token-efficiency-by-kind", "token-efficiency-by-kind.svg")
+    tag_chart = chart_map.get("token-efficiency-by-tag", "token-efficiency-by-tag.svg")
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Token Efficiency Report</title>
+  <title>Token Efficiency Dashboard</title>
   <style>
-    body {{ margin: 0; background: #e2e8f0; color: #0f172a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
-    main {{ max-width: 1120px; margin: 0 auto; padding: 32px 20px 56px; }}
-    header {{ margin-bottom: 22px; }}
-    h1 {{ margin: 0 0 8px; font-size: 34px; letter-spacing: 0; }}
-    .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 18px 0 28px; }}
-    .stat {{ background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px 16px; }}
-    .stat strong {{ display: block; font-size: 24px; }}
-    .chart {{ background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 18px; margin: 16px 0; }}
-    .chart img {{ display: block; width: 100%; height: auto; }}
-    h2 {{ font-size: 15px; color: #475569; margin: 0 0 12px; }}
+    :root {{
+      color-scheme: light;
+      --ink: #111827;
+      --muted: #64748b;
+      --line: #d7dee8;
+      --panel: #ffffff;
+      --soft: #f5f7fb;
+      --blue: #2563eb;
+      --green: #059669;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      background: #e9edf4;
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }}
+    main {{ max-width: 1280px; margin: 0 auto; padding: 28px 24px 56px; }}
+    header {{
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: flex-start;
+      margin-bottom: 18px;
+    }}
+    h1 {{ margin: 0 0 6px; font-size: 34px; line-height: 1.05; letter-spacing: 0; }}
+    h2 {{ margin: 0 0 10px; font-size: 20px; letter-spacing: 0; }}
+    h3 {{ margin: 0 0 8px; font-size: 15px; color: #334155; }}
+    p {{ color: #334155; line-height: 1.5; margin: 0; }}
+    .meta {{ color: var(--muted); font-size: 13px; text-align: right; min-width: 210px; }}
+    .section {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      margin: 14px 0;
+      box-shadow: 0 14px 34px rgba(15, 23, 42, 0.05);
+    }}
+    .summary-list {{ margin: 8px 0 0; padding-left: 21px; color: #243142; }}
+    .summary-list li {{ margin: 7px 0; line-height: 1.45; }}
+    .metric-grid {{
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }}
+    .metric-card {{
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      min-height: 104px;
+      background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    }}
+    .metric-label {{ color: var(--muted); font-size: 12px; font-weight: 750; text-transform: uppercase; letter-spacing: .05em; }}
+    .metric-value {{ font-size: 28px; font-weight: 820; margin-top: 7px; color: #0f172a; }}
+    .metric-context {{ margin-top: 4px; color: #475569; font-size: 13px; line-height: 1.3; }}
+    .two-col {{ display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }}
+    .chart-frame {{ border: 1px solid var(--line); border-radius: 8px; background: var(--soft); padding: 10px; margin-top: 12px; }}
+    .chart-frame img {{ display: block; width: 100%; height: auto; }}
+    .note {{ margin-top: 10px; font-size: 14px; color: #334155; }}
+    table {{ width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }}
+    th, td {{ border-bottom: 1px solid #e2e8f0; padding: 9px 8px; text-align: left; vertical-align: top; }}
+    th {{ color: #475569; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; background: #f8fafc; }}
+    .num {{ text-align: right; font-variant-numeric: tabular-nums; }}
+    .strong {{ font-weight: 800; color: #0f172a; }}
+    .caveats {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }}
+    .caveat {{ background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 13px; font-size: 14px; color: #334155; line-height: 1.4; }}
+    @media (max-width: 900px) {{
+      header, .two-col {{ grid-template-columns: 1fr; display: block; }}
+      .metric-grid, .caveats {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+      .meta {{ text-align: left; margin-top: 8px; }}
+    }}
+    @media (max-width: 620px) {{
+      main {{ padding: 18px 12px 36px; }}
+      .metric-grid, .caveats {{ grid-template-columns: 1fr; }}
+      h1 {{ font-size: 28px; }}
+      table {{ font-size: 12px; }}
+    }}
+    @media print {{
+      body {{ background: #fff; }}
+      main {{ max-width: none; padding: 18px; }}
+      .section {{ box-shadow: none; break-inside: avoid; }}
+    }}
   </style>
 </head>
 <body>
 <main>
   <header>
-    <h1>Token Efficiency Report</h1>
-    <p>Generated from branch-safe Codex token telemetry events.</p>
+    <div>
+      <h1>Token Efficiency Dashboard</h1>
+      <p>Branch-safe Codex token telemetry, prompt-level detail, and daily rollups with average usage per prompt.</p>
+    </div>
+    <div class="meta">
+      <div>Generated {escape_xml(generated)}</div>
+      <div>{escape_xml(str(summary.get('generated_at_utc', '')))}</div>
+    </div>
   </header>
-  <section class="stats">
-    <div class="stat"><span>Events</span><strong>{totals.get('events', 0)}</strong></div>
-    <div class="stat"><span>Total tokens</span><strong>{totals.get('total_tokens', 0)}</strong></div>
-    <div class="stat"><span>API estimate</span><strong>${float(totals.get('estimated_api_usd', 0.0)):.4f}</strong></div>
-    <div class="stat"><span>Codex credits</span><strong>{float(totals.get('estimated_codex_credits', 0.0)):.2f}</strong></div>
+  <section class="section">
+    <h2>Executive Summary</h2>
+    <ul class="summary-list">
+      {summary_items}
+    </ul>
+    <div class="metric-grid">
+      {metric_cards}
+    </div>
   </section>
-  {cards}
+  <section class="section">
+    <h2>Prompt-level timeline keeps same-day runs separate</h2>
+    <p>Each point is a recorded prompt event ordered by timestamp. This fixes the previous one-dot-per-day behavior when several prompts happened on the same date.</p>
+    <div class="chart-frame"><img src="{escape_xml(prompt_chart)}" alt="Prompt-level token usage sequence"></div>
+  </section>
+  <section class="section">
+    <h2>Last 7 days show totals and average tokens per prompt</h2>
+    <p>The daily view is still useful for operating cadence, but it now shows empty days, prompt counts, and average tokens per prompt so aggregation does not hide activity.</p>
+    <div class="chart-frame"><img src="{escape_xml(daily_chart)}" alt="Last seven days token usage"></div>
+  </section>
+  <section class="two-col">
+    <div class="section">
+      <h2>Branch concentration</h2>
+      <p>{escape_xml(branch_note)}</p>
+      <div class="chart-frame"><img src="{escape_xml(branch_chart)}" alt="Token usage by branch"></div>
+    </div>
+    <div class="section">
+      <h2>Model concentration</h2>
+      <p>{escape_xml(model_note)}</p>
+      <div class="chart-frame"><img src="{escape_xml(model_chart)}" alt="Token usage by model"></div>
+    </div>
+  </section>
+  <section class="two-col">
+    <div class="section">
+      <h2>Task type mix</h2>
+      <p>{escape_xml(concentration_note(rows, "kind", "task type"))}</p>
+      <div class="chart-frame"><img src="{escape_xml(kind_chart)}" alt="Token usage by task kind"></div>
+    </div>
+    <div class="section">
+      <h2>Tag mix</h2>
+      <p>{escape_xml(concentration_note(rows, "tags", "tag"))}</p>
+      <div class="chart-frame"><img src="{escape_xml(tag_chart)}" alt="Token usage by tag"></div>
+    </div>
+  </section>
+  <section class="section">
+    <h2>Recent prompt ledger</h2>
+    <p>The table keeps exact prompt-level rows beside the rollups so outliers are auditable without reading raw JSON.</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Branch</th>
+          <th>Kind</th>
+          <th>Model</th>
+          <th>Tags</th>
+          <th class="num">Input</th>
+          <th class="num">Output</th>
+          <th class="num">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {recent_prompt_rows(rows)}
+      </tbody>
+    </table>
+  </section>
+  <section class="section">
+    <h2>Caveats and operating notes</h2>
+    <div class="caveats">
+      <div class="caveat"><strong>Estimates:</strong> Use provider-reported token counts when available. Local estimates are directional when only text is supplied.</div>
+      <div class="caveat"><strong>Source of truth:</strong> Immutable JSON events under <code>.codex/token-usage/events</code> drive this dashboard. Summaries can be regenerated after merges.</div>
+      <div class="caveat"><strong>Grouping:</strong> Daily totals are rollups only. Prompt-level charts and the ledger preserve individual prompt events.</div>
+    </div>
+  </section>
 </main>
 </body>
 </html>
@@ -1240,6 +1813,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_visualize.add_argument("--output-dir", help="Output directory; defaults to .codex/token-usage/visuals")
     p_visualize.add_argument("--remotion-dir", help="Remotion package output; defaults to <output-dir>/remotion")
     p_visualize.add_argument("--skip-remotion", action="store_true", help="Skip writing the Remotion package")
+    p_visualize.add_argument("--pdf", action="store_true", help="Also export the dashboard to PDF using Chrome/Chromium")
+    p_visualize.add_argument("--pdf-path", help="Optional PDF output path; implies --pdf")
     p_visualize.set_defaults(func=visualize)
     return parser
 

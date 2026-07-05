@@ -1,0 +1,4 @@
+interface:
+  display_name: "Railway Cost Auditor"
+  short_description: "Cut Railway spend without slowing users"
+  default_prompt: "Use $railway-cost-auditor to audit Railway spend for this repo and produce safe cost cuts."

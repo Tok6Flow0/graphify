@@ -1,0 +1,4 @@
+interface:
+  display_name: "Token Efficient Coordinator"
+  short_description: "Graph-first routing, worker budgeting, and token telemetry"
+  default_prompt: "Use $token-efficient-coordinator to plan this repo task with graph-first exploration, low-cost subagents, and lightweight token tracking."

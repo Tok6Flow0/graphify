@@ -1,0 +1,86 @@
+{
+  "by_branch": {
+    "main": {
+      "cached_input_tokens": 0,
+      "estimated_api_usd": 0.026405,
+      "estimated_codex_credits": 0.6601,
+      "events": 1,
+      "input_tokens": 31,
+      "output_tokens": 875,
+      "total_tokens": 906
+    }
+  },
+  "by_day": {
+    "2026-07-05": {
+      "cached_input_tokens": 0,
+      "estimated_api_usd": 0.026405,
+      "estimated_codex_credits": 0.6601,
+      "events": 1,
+      "input_tokens": 31,
+      "output_tokens": 875,
+      "total_tokens": 906
+    }
+  },
+  "by_kind": {
+    "skill-update": {
+      "cached_input_tokens": 0,
+      "estimated_api_usd": 0.026405,
+      "estimated_codex_credits": 0.6601,
+      "events": 1,
+      "input_tokens": 31,
+      "output_tokens": 875,
+      "total_tokens": 906
+    }
+  },
+  "by_model": {
+    "gpt-5.5": {
+      "cached_input_tokens": 0,
+      "estimated_api_usd": 0.026405,
+      "estimated_codex_credits": 0.6601,
+      "events": 1,
+      "input_tokens": 31,
+      "output_tokens": 875,
+      "total_tokens": 906
+    }
+  },
+  "by_tag": {
+    "local-skill-rollout": {
+      "cached_input_tokens": 0,
+      "estimated_api_usd": 0.026405,
+      "estimated_codex_credits": 0.6601,
+      "events": 1,
+      "input_tokens": 31,
+      "output_tokens": 875,
+      "total_tokens": 906
+    },
+    "railway-audit": {
+      "cached_input_tokens": 0,
+      "estimated_api_usd": 0.026405,
+      "estimated_codex_credits": 0.6601,
+      "events": 1,
+      "input_tokens": 31,
+      "output_tokens": 875,
+      "total_tokens": 906
+    },
+    "token-efficiency": {
+      "cached_input_tokens": 0,
+      "estimated_api_usd": 0.026405,
+      "estimated_codex_credits": 0.6601,
+      "events": 1,
+      "input_tokens": 31,
+      "output_tokens": 875,
+      "total_tokens": 906
+    }
+  },
+  "generated_at_utc": "2026-07-05T18:48:04+00:00",
+  "schema_version": 1,
+  "totals": {
+    "cached_input_tokens": 0,
+    "estimated_api_usd": 0.026405,
+    "estimated_codex_credits": 0.6601,
+    "events": 1,
+    "input_tokens": 31,
+    "output_tokens": 875,
+    "total_tokens": 906
+  }
+}

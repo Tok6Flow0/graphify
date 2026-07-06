@@ -1,0 +1,3 @@
+display_name: Skill Anatomy Rulebook
+short_description: Create and review repo-local skills with required anatomy, triggers, validation, and efficient references.
+default_prompt: Use the skill anatomy rulebook to create or update a repo-local skill cleanly.

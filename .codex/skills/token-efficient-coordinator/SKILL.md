@@ -5,6 +5,16 @@ description: Plan and execute Codex work with graph-first repository exploration
 
 # Token Efficient Coordinator
 
+## Overview
+
+Coordinate non-trivial Codex work so expensive reasoning is reserved for decisions that need it, while graph-first exploration, low-cost workers, and lightweight telemetry keep repeated repo work efficient.
+
+## When to Use
+
+- Use for repo exploration, multi-file implementation, debugging, refactoring, review, architecture analysis, Railway audits, and any request that benefits from graph-guided file selection or worker delegation.
+- Use when tracking or visualizing token usage for repo work.
+- Do not use for a very small, single-step answer or command that needs no repo exploration, planning, edits, or subagents.
+
 ## Objective
 
 Use the most expensive reasoning only where it pays for itself. Keep `gpt-5.5` focused on coordination, ambiguity resolution, risk review, and final synthesis. Push narrow, graph-scoped discovery and extraction work to cheaper workers.
@@ -248,6 +258,36 @@ Escalate upward when:
 - migrations, concurrency, or subtle correctness are involved
 
 Ladder: `atomic_worker` -> `light_worker` -> `standard_balanced` -> `frontier_balanced` -> `frontier_deep`.
+
+## Common Rationalizations
+
+| Rationalization | Reality |
+|---|---|
+| "I already know the repo, so I can skip Graphify." | Graphify is the cheapest current map and prevents broad repeated reads. |
+| "Subagents are overhead unless savings are large." | Small savings compound; use worker swarms when the estimate is at most 0.99x the monolithic plan and risk is bounded. |
+| "Token logging costs more than it saves." | The local script records concise metadata and avoids extra model calls. |
+| "Daily token charts are enough." | Daily charts hide prompt-level behavior; preserve prompt sequence and daily rollups. |
+| "Summaries can be merged manually." | Branch-safe event files are the source of truth; regenerate summaries from events. |
+
+## Red Flags
+
+- Broad `rg`, `find`, or file reads before checking `graphify-out/GRAPH_REPORT.md`.
+- Multiple workers reading the same large file set without an intentional review reason.
+- A smaller model receives a vague, long, or cross-cutting task card.
+- Edits are committed without refreshing graph outputs when the tree is otherwise safe to refresh.
+- `.codex/token-usage/ledger.jsonl` or `summary.json` is hand-merged instead of regenerated.
+- A dashboard groups all same-day prompts into one point without prompt-level rows.
+
+## Verification
+
+Before finishing non-trivial work, confirm:
+
+- [ ] Graph consulted first or the exception is documented.
+- [ ] Worker routing decision was made with scope, cost, and risk in mind.
+- [ ] Changed files were validated with relevant tests/checks.
+- [ ] Graphify output was refreshed after edits, or skipped to avoid touching unrelated dirty work.
+- [ ] A lightweight token event was recorded when the repo state allowed it.
+- [ ] Branch-safe token summaries were regenerated after merges to `main` when applicable.
 
 ## Run Report
 

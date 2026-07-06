@@ -5,6 +5,16 @@ description: Audit and reduce Railway spend without slowing user-facing workflow
 
 # Railway Cost Auditor
 
+## Overview
+
+Audit Railway projects by proving where spend comes from, then remove structural waste such as idle compute, public internal traffic, duplicated environments, app-served files, and oversized process topology without slowing user-facing workflows.
+
+## When to Use
+
+- Use for Railway MCP/CLI audits, Railway cost reduction, service topology review, private networking, preview environments, process sizing, cache/CDN changes, or repo changes intended to reduce Railway spend.
+- Use when asked to prove before/after Railway cost or utilization standing.
+- Do not use for unrelated app changes unless Railway cost, deployment, networking, or runtime behavior is part of the task.
+
 ## Objective
 
 Reduce Railway spend by removing structural waste before tuning code. Target a 90% reduction only when evidence shows idle compute, public internal egress, duplicated preview stacks, app-served files, or oversized worker/process topology. Do not claim the target was hit without before/after metrics or a run-rate calculation.
@@ -101,3 +111,33 @@ railway variable set SamuelEdgeProvisioning__PollSeconds=5 --project <project-id
 railway scale -p <project-id> -e production -s <service> us-west2=1
 railway redeploy --project <project-id> --environment production --service <service> --yes
 ```
+
+## Common Rationalizations
+
+| Rationalization | Reality |
+|---|---|
+| "The bill is high, so scaling everything down is the fastest fix." | Cost changes need service-level evidence and rollback, especially for user-facing paths. |
+| "Public URLs work, so private networking can wait." | Public internal traffic adds egress and latency; private Railway references are the modern default for colocated services. |
+| "Preview environments are temporary, so they do not matter." | Unbounded previews and broad watch paths silently multiply compute and builds. |
+| "Files are easy to serve through the app." | Reusable downloads, exports, and media belong behind cache/CDN or bucket flows when evidence shows public byte spend. |
+| "A 90% reduction can be claimed from configuration intent." | The target requires before/after metrics or a defensible run-rate calculation. |
+
+## Red Flags
+
+- Railway variables or logs are printed with secret values instead of redacted classifications.
+- Recommendations are made without project, environment, service, and time-window scope.
+- Spend categories under 5% distract from larger memory, egress, CPU, or volume drivers.
+- A live mutation lacks a rollback command.
+- Internal services call public database URLs or public service domains.
+- Always-on workers, preview stacks, or replicas exist without traffic or job evidence.
+
+## Verification
+
+Before finishing an audit, confirm:
+
+- [ ] Railway project, environment, services, and measurement window are named.
+- [ ] Before metrics include memory, CPU, egress/ingress, volume, replicas, sleep, regions, and domains when available.
+- [ ] Every live change or recommendation has a rollback path.
+- [ ] Secret values were never printed.
+- [ ] After metrics or expected run-rate are clearly labeled.
+- [ ] User impact and remaining blockers to the reduction target are documented.

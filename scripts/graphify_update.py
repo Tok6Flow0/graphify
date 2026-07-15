@@ -294,6 +294,14 @@ def _write_fallback_manifest(out_dir: Path, detection: dict, repo_root: Path) ->
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
 
+def _agent_routing_annotation() -> str:
+    return (
+        "## Agent Routing Policy\n\n"
+        "- Prefer small, narrowly scoped workers for independent tasks; do not maintain a hard-coded model or sub-agent roster.\n"
+        "- In Cursor Auto, recommend nested workers also use Auto when supported; verify the spawned worker in Cursor's run trace.\n"
+    )
+
+
 def _write_fallback_report(
     out_dir: Path,
     detection: dict,
@@ -331,6 +339,7 @@ def _write_fallback_report(
         for q in suggested_questions[:20]:
             report_lines.append(f"- {q}")
 
+    report_lines.extend(["", _agent_routing_annotation().rstrip()])
     (out_dir / "GRAPH_REPORT.md").write_text("\n".join(report_lines), encoding="utf-8")
 
 
@@ -440,6 +449,7 @@ def run_update(target: Path, repo_root: Path | None = None, max_code_files: int 
         str(root),
         suggested_questions=questions,
     )
+    report = report.rstrip() + "\n\n" + _agent_routing_annotation()
     (out / "GRAPH_REPORT.md").write_text(report)
     _graphify_to_json(graph, communities, str(out / "graph.json"))
 
